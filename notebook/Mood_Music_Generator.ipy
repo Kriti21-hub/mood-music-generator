@@ -1,0 +1,763 @@
+{
+  "nbformat": 4,
+  "nbformat_minor": 0,
+  "metadata": {
+    "colab": {
+      "provenance": [],
+      "authorship_tag": "ABX9TyPAO29juxuQD2NcC7jK7I8e",
+      "include_colab_link": true
+    },
+    "kernelspec": {
+      "name": "python3",
+      "display_name": "Python 3"
+    },
+    "language_info": {
+      "name": "python"
+    }
+  },
+  "cells": [
+    {
+      "cell_type": "markdown",
+      "metadata": {
+        "id": "view-in-github",
+        "colab_type": "text"
+      },
+      "source": [
+        "<a href=\"https://colab.research.google.com/github/Kriti21-hub/mood-music-generator/blob/main/notebook/Mood_Music_Generator.ipy\" target=\"_parent\"><img src=\"https://colab.research.google.com/assets/colab-badge.svg\" alt=\"Open In Colab\"/></a>"
+      ]
+    },
+    {
+      "cell_type": "code",
+      "execution_count": null,
+      "metadata": {
+        "id": "QLDd9DXvLWIF"
+      },
+      "outputs": [],
+      "source": [
+        "!pip -q install music21 mido pyFluidSynth numpy\n"
+      ]
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "%%writefile config.py\n",
+        "# === GLOBAL TIMING ===\n",
+        "PPQ = 480                  # ticks per quarter note\n",
+        "TIME_SIGNATURE = (4, 4)    # 4/4\n",
+        "DEFAULT_BARS = 16          # default song length\n",
+        "STEPS_PER_BAR = 16         # 16 steps per bar (1/16 notes)\n",
+        "\n",
+        "# === SOUND ===\n",
+        "SOUNDFONT_PATH = \"FluidR3_GM.sf2\"  # downloaded above (optional for WAV)\n",
+        "\n",
+        "# === MIDI CHANNELS (0-indexed; drums must be 9 for GM) ===\n",
+        "CHANNELS = {\n",
+        "    \"melody\": 0,\n",
+        "    \"chords\": 1,\n",
+        "    \"bass\":   2,\n",
+        "    \"pad\":    3,\n",
+        "    \"drums\":  9,  # GM drums\n",
+        "}\n",
+        "\n",
+        "# === GENERAL MIDI PROGRAMS (0..127) ===\n",
+        "PROGRAMS = {\n",
+        "    \"piano\":        0,   # Acoustic Grand (GM 1)\n",
+        "    \"epiano1\":      4,   # Electric Piano 1 (GM 5)\n",
+        "    \"nylon_guitar\": 24,  # Acoustic Guitar Nylon (GM 25)\n",
+        "    \"strings\":      48,  # String Ensemble 1 (GM 49)\n",
+        "    \"warm_pad\":     89,  # Pad 2 (Warm) (GM 90)\n",
+        "    \"saw_lead\":     81,  # Lead 2 (Saw) (GM 82)\n",
+        "    \"acoustic_bass\":32,  # Acoustic Bass (GM 33)\n",
+        "    \"synth_bass\":   38,  # Synth Bass 1 (GM 39)\n",
+        "}\n",
+        "\n",
+        "# === DRUM NOTE NUMBERS (General MIDI on channel 10) ===\n",
+        "DRUM_NOTES = {\n",
+        "    \"kick\":       36,\n",
+        "    \"snare\":      38,\n",
+        "    \"hh_closed\":  42,\n",
+        "    \"hh_open\":    46,\n",
+        "}\n",
+        "\n",
+        "# 16-step patterns per bar (1=hit, 0=rest)\n",
+        "DRUM_PATTERNS = {\n",
+        "    \"Happy\": {\n",
+        "        \"kick\":      [1,0,0,0, 0,0,1,0, 1,0,0,0, 0,0,1,0],\n",
+        "        \"snare\":     [0,0,0,0, 1,0,0,0, 0,0,0,0, 1,0,0,0],\n",
+        "        \"hh_closed\": [1,1,1,1, 1,1,1,1, 1,1,1,1, 1,1,1,1],\n",
+        "        \"hh_open\":   [0]*16,\n",
+        "    },\n",
+        "    \"Chill\": {\n",
+        "        \"kick\":      [1,0,0,0, 0,0,0,0, 0,0,1,0, 0,0,0,0],\n",
+        "        \"snare\":     [0,0,0,0, 1,0,0,0, 0,0,0,0, 1,0,0,0],\n",
+        "        \"hh_closed\": [1,0,0,0, 1,0,0,0, 1,0,0,0, 1,0,0,0],\n",
+        "        \"hh_open\":   [0]*16,\n",
+        "    },\n",
+        "    \"Focus\": {\n",
+        "        \"kick\":      [1,0,0,0, 0,0,1,0, 1,0,0,0, 0,0,1,0],\n",
+        "        \"snare\":     [0,0,0,0, 1,0,0,0, 0,0,0,0, 1,0,0,0],\n",
+        "        \"hh_closed\": [1,0,1,0, 1,0,1,0, 1,0,1,0, 1,0,1,0],\n",
+        "        \"hh_open\":   [0]*16,\n",
+        "    },\n",
+        "    \"Sad\": {\n",
+        "        \"kick\":      [1,0,0,0, 0,0,0,0, 0,0,1,0, 0,0,0,0],\n",
+        "        \"snare\":     [0,0,0,0, 1,0,0,0, 0,0,0,0, 1,0,0,0],\n",
+        "        \"hh_closed\": [1,0,0,0, 0,0,1,0, 0,0,1,0, 0,0,1,0],\n",
+        "        \"hh_open\":   [0]*16,\n",
+        "    },\n",
+        "    \"Energetic\": {\n",
+        "        \"kick\":      [1,0,0,1, 0,1,0,0, 1,0,0,1, 0,1,0,0],\n",
+        "        \"snare\":     [0,0,0,0, 1,0,0,0, 0,0,0,0, 1,0,0,0],\n",
+        "        \"hh_closed\": [1,1,1,1, 1,1,1,1, 1,1,1,1, 1,1,1,1],\n",
+        "        \"hh_open\":   [0,0,0,0, 0,0,1,0, 0,0,0,0, 0,0,1,0],\n",
+        "    },\n",
+        "}\n",
+        "\n",
+        "# === MOOD MAP (keys, bpm, progression, instruments, densities) ===\n",
+        "MOODS = {\n",
+        "    \"Happy\": {\n",
+        "        \"keys\": [\"C\",\"G\",\"D\"],\n",
+        "        \"mode\": \"Major\",\n",
+        "        \"bpm_range\": (118, 126),\n",
+        "        \"progression\": [\"I\",\"V\",\"vi\",\"IV\"],  # 4 bars, repeats\n",
+        "        \"swing_pct\": 0.0,\n",
+        "        \"humanize_ms\": 8,\n",
+        "        \"instruments\": {\"chords\":\"piano\",\"pad\":\"warm_pad\",\"melody\":\"nylon_guitar\",\"bass\":\"acoustic_bass\",\"drums\":True},\n",
+        "        \"velocity\": {\"chords\":(70,100),\"pad\":(50,80),\"melody\":(80,110),\"bass\":(75,100),\"drums\":(80,110)},\n",
+        "        \"density\": {\"melody\":0.7,\"chords\":0.9,\"pad\":0.4,\"bass\":0.8},\n",
+        "    },\n",
+        "    \"Chill\": {\n",
+        "        \"keys\": [\"D\",\"F\"],\n",
+        "        \"mode\": \"Dorian_or_Lydian\",  # pick one later\n",
+        "        \"bpm_range\": (74, 86),\n",
+        "        \"progression\": [\"i\",\"VII\",\"IV\"],\n",
+        "        \"swing_pct\": 7.5,\n",
+        "        \"humanize_ms\": 12,\n",
+        "        \"instruments\": {\"chords\":\"epiano1\",\"pad\":\"warm_pad\",\"melody\":\"epiano1\",\"bass\":\"acoustic_bass\",\"drums\":True},\n",
+        "        \"velocity\": {\"chords\":(55,80),\"pad\":(45,70),\"melody\":(55,85),\"bass\":(55,80),\"drums\":(50,80)},\n",
+        "        \"density\": {\"melody\":0.4,\"chords\":0.6,\"pad\":0.6,\"bass\":0.5},\n",
+        "    },\n",
+        "    \"Focus\": {\n",
+        "        \"keys\": [\"A\"],\n",
+        "        \"mode\": \"Aeolian\",\n",
+        "        \"bpm_range\": (90, 100),\n",
+        "        \"progression\": [\"i\",\"iv\",\"v\",\"iv\"],\n",
+        "        \"swing_pct\": 0.0,\n",
+        "        \"humanize_ms\": 6,\n",
+        "        \"instruments\": {\"chords\":\"epiano1\",\"pad\":\"strings\",\"melody\":\"epiano1\",\"bass\":\"acoustic_bass\",\"drums\":True},\n",
+        "        \"velocity\": {\"chords\":(60,85),\"pad\":(50,75),\"melody\":(60,85),\"bass\":(60,85),\"drums\":(60,85)},\n",
+        "        \"density\": {\"melody\":0.5,\"chords\":0.7,\"pad\":0.5,\"bass\":0.7},\n",
+        "    },\n",
+        "    \"Sad\": {\n",
+        "        \"keys\": [\"E\"],\n",
+        "        \"mode\": \"Aeolian\",\n",
+        "        \"bpm_range\": (66, 78),\n",
+        "        \"progression\": [\"i\",\"VI\",\"III\",\"VII\"],\n",
+        "        \"swing_pct\": 0.0,\n",
+        "        \"humanize_ms\": 10,\n",
+        "        \"instruments\": {\"chords\":None,\"pad\":None,\"melody\":\"piano\",\"bass\":None,\"drums\":False},\n",
+        "        \"velocity\": {\"melody\":(50,80)},\n",
+        "        \"density\": {\"melody\":0.35},\n",
+        "    },\n",
+        "    \"Energetic\": {\n",
+        "        \"keys\": [\"A\"],\n",
+        "        \"mode\": \"Mixolydian\",\n",
+        "        \"bpm_range\": (128, 140),\n",
+        "        \"progression\": [\"I\",\"bVII\",\"IV\",\"I\"],\n",
+        "        \"swing_pct\": 0.0,\n",
+        "        \"humanize_ms\": 5,\n",
+        "        \"instruments\": {\"chords\":\"saw_lead\",\"pad\":\"warm_pad\",\"melody\":\"saw_lead\",\"bass\":\"synth_bass\",\"drums\":True},\n",
+        "        \"velocity\": {\"chords\":(85,115),\"pad\":(60,90),\"melody\":(90,120),\"bass\":(85,115),\"drums\":(85,120)},\n",
+        "        \"density\": {\"melody\":0.8,\"chords\":0.9,\"pad\":0.5,\"bass\":0.9},\n",
+        "    },\n",
+        "}\n"
+      ],
+      "metadata": {
+        "colab": {
+          "base_uri": "https://localhost:8080/"
+        },
+        "id": "JlhrdUvMSQK8",
+        "outputId": "6f9f3712-1286-45d6-92a3-a3fa1b8c7c1b"
+      },
+      "execution_count": null,
+      "outputs": [
+        {
+          "output_type": "stream",
+          "name": "stdout",
+          "text": [
+            "Overwriting config.py\n"
+          ]
+        }
+      ]
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "%%writefile theory.py\n",
+        "# Simple music theory helpers.\n",
+        "\n",
+        "from typing import List, Tuple\n",
+        "from config import PPQ, STEPS_PER_BAR\n",
+        "\n",
+        "# Semitone offsets for modes (relative to tonic)\n",
+        "MODE_INTERVALS = {\n",
+        "    \"Major\":       [0,2,4,5,7,9,11],   # Ionian\n",
+        "    \"Aeolian\":     [0,2,3,5,7,8,10],   # Natural minor\n",
+        "    \"Dorian\":      [0,2,3,5,7,9,10],\n",
+        "    \"Lydian\":      [0,2,4,6,7,9,11],\n",
+        "    \"Mixolydian\":  [0,2,4,5,7,9,10],\n",
+        "}\n",
+        "\n",
+        "# Map tonic name to semitone offset from C (no accidentals beyond #/b)\n",
+        "TONIC_OFFSETS = {\n",
+        "    \"C\":0,\"C#\":1,\"Db\":1,\"D\":2,\"D#\":3,\"Eb\":3,\"E\":4,\"F\":5,\"F#\":6,\"Gb\":6,\n",
+        "    \"G\":7,\"G#\":8,\"Ab\":8,\"A\":9,\"A#\":10,\"Bb\":10,\"B\":11\n",
+        "}\n",
+        "\n",
+        "def build_scale(tonic:str, mode:str, base_octave:int=4) -> List[int]:\n",
+        "    \"\"\"Return 7 MIDI notes for the scale in a given octave (C4=60).\"\"\"\n",
+        "    if mode not in MODE_INTERVALS:\n",
+        "        raise ValueError(f\"Unknown mode: {mode}\")\n",
+        "    if tonic not in TONIC_OFFSETS:\n",
+        "        raise ValueError(f\"Unknown tonic: {tonic}\")\n",
+        "    c4 = 60  # MIDI for C4\n",
+        "    tonic_base = (c4 // 12) * 12 + TONIC_OFFSETS[tonic] + (base_octave - 4) * 12\n",
+        "    return [tonic_base + i for i in MODE_INTERVALS[mode]]\n",
+        "\n",
+        "def degree_to_midi(scale:List[int], degree:int, octave_shift:int=0) -> int:\n",
+        "    \"\"\"Degree = 1..7. octave_shift can move up/down by 12 semitones.\"\"\"\n",
+        "    idx = (degree - 1) % 7\n",
+        "    return scale[idx] + (octave_shift * 12)\n",
+        "\n",
+        "def triad_from_degree(scale:List[int], degree:int, octave_shift:int=0) -> Tuple[int,int,int]:\n",
+        "    \"\"\"Return (root, third, fifth) MIDI for the given degree.\"\"\"\n",
+        "    root = degree_to_midi(scale, degree, octave_shift)\n",
+        "    third = degree_to_midi(scale, ((degree+2-1)%7)+1, octave_shift)   # +2 scale steps\n",
+        "    fifth = degree_to_midi(scale, ((degree+4-1)%7)+1, octave_shift)   # +4 scale steps\n",
+        "    return (root, third, fifth)\n",
+        "\n",
+        "def roman_to_degree(token:str) -> Tuple[int, int]:\n",
+        "    \"\"\"\n",
+        "    Convert roman like 'I','vi','bVII' -> (degree 1..7, accidental in semitones).\n",
+        "    accidental: -1 for 'b' flat, +1 for '#' sharp. We only support 'b' here.\n",
+        "    \"\"\"\n",
+        "    accidental = 0\n",
+        "    if token.startswith(\"b\"):\n",
+        "        accidental = -1\n",
+        "        token = token[1:]\n",
+        "    base = token.strip().upper()\n",
+        "    mapping = {\"I\":1,\"II\":2,\"III\":3,\"IV\":4,\"V\":5,\"VI\":6,\"VII\":7}\n",
+        "    if base not in mapping:\n",
+        "        raise ValueError(f\"Unknown roman degree: {token}\")\n",
+        "    return mapping[base], accidental\n",
+        "\n",
+        "# ---- timing helpers ----\n",
+        "def steps_to_ticks(steps:int) -> int:\n",
+        "    \"\"\"Convert grid steps to MIDI ticks (1 step = 1/16 note).\"\"\"\n",
+        "    ticks_per_step = PPQ // 4  # since 1 quarter has 4 sixteenth notes\n",
+        "    return steps * ticks_per_step\n"
+      ],
+      "metadata": {
+        "colab": {
+          "base_uri": "https://localhost:8080/"
+        },
+        "id": "L_3H7RmJSYmh",
+        "outputId": "bcf65403-4337-4f50-98e6-72a08e8b1edc"
+      },
+      "execution_count": null,
+      "outputs": [
+        {
+          "output_type": "stream",
+          "name": "stdout",
+          "text": [
+            "Writing theory.py\n"
+          ]
+        }
+      ]
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "%%writefile composer.py\n",
+        "# Compose a small piece based on mood.\n",
+        "import random\n",
+        "from typing import Dict, List, Tuple\n",
+        "from config import MOODS, DRUM_PATTERNS, STEPS_PER_BAR\n",
+        "from theory import build_scale, triad_from_degree, roman_to_degree, degree_to_midi\n",
+        "\n",
+        "# Random helper inside ranges\n",
+        "def rand_in(low:int, high:int) -> int:\n",
+        "    return random.randint(low, high)\n",
+        "\n",
+        "def choose_mode(mood_map:Dict) -> str:\n",
+        "    # For Chill, pick Dorian or Lydian randomly\n",
+        "    m = mood_map[\"mode\"]\n",
+        "    if m == \"Dorian_or_Lydian\":\n",
+        "        return random.choice([\"Dorian\",\"Lydian\"])\n",
+        "    return m\n",
+        "\n",
+        "def build_progression(tonic:str, mode:str, scheme:List[str], bars:int) -> List[Tuple[int,int]]:\n",
+        "    \"\"\"\n",
+        "    Return list of (degree, accidental) per bar, repeating the scheme to fill bars.\n",
+        "    \"\"\"\n",
+        "    prog = []\n",
+        "    for i in range(bars):\n",
+        "        token = scheme[i % len(scheme)]\n",
+        "        deg, acc = roman_to_degree(token)\n",
+        "        prog.append((deg, acc))\n",
+        "    return prog\n",
+        "\n",
+        "# --- Track event types ---\n",
+        "# For simplicity, we use a common event struct: (start_step, dur_steps, midi_note, velocity)\n",
+        "Event = Tuple[int,int,int,int]\n",
+        "\n",
+        "def make_chord_events(scale:List[int], progression:List[Tuple[int,int]], bars:int, velocity:Tuple[int,int]) -> List[Event]:\n",
+        "    events: List[Event] = []\n",
+        "    vmin,vmax = velocity\n",
+        "    for bar, (deg, acc) in enumerate(progression[:bars]):\n",
+        "        # triad in middle octave\n",
+        "        r,t,f = triad_from_degree(scale, deg, octave_shift=0)\n",
+        "        # accidental flat for special roman like bVII (subtract 1 semitone)\n",
+        "        if acc != 0:\n",
+        "            r += acc\n",
+        "            t += acc\n",
+        "            f += acc\n",
+        "        start = bar * STEPS_PER_BAR\n",
+        "        dur = STEPS_PER_BAR  # hold whole bar\n",
+        "        vel = rand_in(vmin, vmax)\n",
+        "        for n in (r,t,f):\n",
+        "            events.append((start, dur, n, vel))\n",
+        "    return events\n",
+        "\n",
+        "def make_bass_events(scale:List[int], progression:List[Tuple[int,int]], bars:int, velocity:Tuple[int,int]) -> List[Event]:\n",
+        "    events: List[Event] = []\n",
+        "    vmin,vmax = velocity\n",
+        "    for bar, (deg, acc) in enumerate(progression[:bars]):\n",
+        "        root = degree_to_midi(scale, deg, octave_shift=-1)  # one octave lower\n",
+        "        if acc != 0: root += acc\n",
+        "        start = bar * STEPS_PER_BAR\n",
+        "        half = STEPS_PER_BAR // 2\n",
+        "        vel = rand_in(vmin, vmax)\n",
+        "        # root on beat 1 and 3\n",
+        "        events.append((start, half, root, vel))\n",
+        "        events.append((start+half, half, root, max(vmin, vel-10)))\n",
+        "    return events\n",
+        "\n",
+        "def make_melody_events(scale:List[int], progression:List[Tuple[int,int]], bars:int, velocity:Tuple[int,int], density:float) -> List[Event]:\n",
+        "    \"\"\"\n",
+        "    Simple rule-based melody:\n",
+        "    - prefers chord tones (1,3,5) on strong beats (step % 4 == 0)\n",
+        "    - uses passing tones on weak beats\n",
+        "    - resolves phrase ends to degree 1 or 5\n",
+        "    \"\"\"\n",
+        "    events: List[Event] = []\n",
+        "    vmin,vmax = velocity\n",
+        "    for bar, (deg, acc) in enumerate(progression[:bars]):\n",
+        "        # chord tones for this bar\n",
+        "        r,t,f = triad_from_degree(scale, deg, 0)\n",
+        "        if acc != 0: r+=acc; t+=acc; f+=acc\n",
+        "        chord_tones = [r,t,f]\n",
+        "        # choose 8 notes per bar at most (on 16-step grid)\n",
+        "        for step in range(STEPS_PER_BAR):\n",
+        "            strong = (step % 4 == 0)  # strong every 4 steps (quarter notes)\n",
+        "            # decide if we place a note here based on density\n",
+        "            if random.random() < (density * (1.2 if strong else 0.8)):\n",
+        "                if strong:\n",
+        "                    note = random.choice(chord_tones)\n",
+        "                else:\n",
+        "                    # passing tone: move +/-2 semitones from nearest chord tone\n",
+        "                    base = random.choice(chord_tones)\n",
+        "                    note = base + random.choice([-2, -1, 1, 2])\n",
+        "                # clamp melody into a nice range (C4..C6)\n",
+        "                note = max(60, min(84, note))\n",
+        "                # short or medium duration\n",
+        "                dur = random.choice([2, 2, 4])  # mostly 1/8 notes, sometimes 1/4\n",
+        "                vel = rand_in(vmin, vmax)\n",
+        "                events.append((bar*STEPS_PER_BAR + step, dur, note, vel))\n",
+        "        # end of bar: force resolution sometimes\n",
+        "        if random.random() < 0.5:\n",
+        "            resolve = random.choice([degree_to_midi(scale, 1, 0), degree_to_midi(scale, 5, 0)])\n",
+        "            resolve = max(60, min(84, resolve))\n",
+        "            events.append((bar*STEPS_PER_BAR + (STEPS_PER_BAR-2), 2, resolve, rand_in(vmin, vmax)))\n",
+        "    return events\n",
+        "\n",
+        "def make_pad_events(scale:List[int], progression:List[Tuple[int,int]], bars:int, velocity:Tuple[int,int]) -> List[Event]:\n",
+        "    # pad holds longer notes (half-bar)\n",
+        "    events: List[Event] = []\n",
+        "    vmin,vmax = velocity\n",
+        "    half = STEPS_PER_BAR // 2\n",
+        "    for bar, (deg, acc) in enumerate(progression[:bars]):\n",
+        "        r,t,f = triad_from_degree(scale, deg, 1)  # one octave up\n",
+        "        if acc != 0: r+=acc; t+=acc; f+=acc\n",
+        "        for h in [0, half]:\n",
+        "            start = bar*STEPS_PER_BAR + h\n",
+        "            vel = rand_in(vmin, vmax)\n",
+        "            for n in (r,t,f):\n",
+        "                events.append((start, half, n, vel))\n",
+        "    return events\n",
+        "\n",
+        "def make_drum_events(pattern_name:str, bars:int, velocity:Tuple[int,int]) -> List[Event]:\n",
+        "    # drums use MIDI notes on channel 10 (we'll place \"note\" as drum note numbers)\n",
+        "    from config import DRUM_PATTERNS, DRUM_NOTES\n",
+        "    vmin,vmax = velocity\n",
+        "    patt = DRUM_PATTERNS[pattern_name]\n",
+        "    events: List[Event] = []\n",
+        "    for bar in range(bars):\n",
+        "        for i in range(STEPS_PER_BAR):\n",
+        "            start = bar*STEPS_PER_BAR + i\n",
+        "            if patt[\"kick\"][i]:  events.append((start, 1, DRUM_NOTES[\"kick\"], rand_in(vmin,vmax)))\n",
+        "            if patt[\"snare\"][i]: events.append((start, 1, DRUM_NOTES[\"snare\"], rand_in(vmin,vmax)))\n",
+        "            if patt[\"hh_closed\"][i]: events.append((start, 1, DRUM_NOTES[\"hh_closed\"], rand_in(vmin,vmax)))\n",
+        "            if patt[\"hh_open\"][i]:   events.append((start, 1, DRUM_NOTES[\"hh_open\"], rand_in(vmin,vmax)))\n",
+        "    return events\n",
+        "\n",
+        "def compose(mood_name:str=\"Happy\", bars:int=16, seed:int=None) -> Dict[str, List[Event]]:\n",
+        "    if seed is not None:\n",
+        "        random.seed(seed)\n",
+        "    mood = MOODS[mood_name]\n",
+        "    # choose key + mode\n",
+        "    key = random.choice(mood[\"keys\"])\n",
+        "    mode = mood[\"mode\"]\n",
+        "    if mode == \"Dorian_or_Lydian\":\n",
+        "        mode = random.choice([\"Dorian\",\"Lydian\"])\n",
+        "    # build scale (center around octave 4)\n",
+        "    scale = build_scale(key, mode, base_octave=4)\n",
+        "    # build progression per bar\n",
+        "    progression = build_progression(key, mode, mood[\"progression\"], bars)\n",
+        "    # velocities\n",
+        "    vel = mood[\"velocity\"]\n",
+        "    # tracks\n",
+        "    tracks: Dict[str, List[Event]] = {}\n",
+        "    if mood[\"instruments\"].get(\"chords\"):\n",
+        "        tracks[\"chords\"] = make_chord_events(scale, progression, bars, vel[\"chords\"])\n",
+        "    if mood[\"instruments\"].get(\"bass\"):\n",
+        "        tracks[\"bass\"] = make_bass_events(scale, progression, bars, vel[\"bass\"])\n",
+        "    if mood[\"instruments\"].get(\"pad\"):\n",
+        "        tracks[\"pad\"] = make_pad_events(scale, progression, bars, vel[\"pad\"])\n",
+        "    if \"melody\" in mood[\"instruments\"] and mood[\"instruments\"][\"melody\"]:\n",
+        "        tracks[\"melody\"] = make_melody_events(scale, progression, bars, vel.get(\"melody\", (70,100)), mood[\"density\"][\"melody\"])\n",
+        "    if mood[\"instruments\"].get(\"drums\"):\n",
+        "        tracks[\"drums\"] = make_drum_events(mood_name, bars, vel[\"drums\"])\n",
+        "    # also return chosen params for display\n",
+        "    tracks[\"_meta\"] = [(\"key\", key), (\"mode\", mode), (\"bpm\", random.randint(*mood[\"bpm_range\"]))]\n",
+        "    return tracks\n"
+      ],
+      "metadata": {
+        "colab": {
+          "base_uri": "https://localhost:8080/"
+        },
+        "id": "bdwMP_KASdvc",
+        "outputId": "91cd0e9c-1e7d-4f1f-e993-0fcc77826e85"
+      },
+      "execution_count": null,
+      "outputs": [
+        {
+          "output_type": "stream",
+          "name": "stdout",
+          "text": [
+            "Overwriting composer.py\n"
+          ]
+        }
+      ]
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "%%writefile render.py\n",
+        "# Build MIDI from events, and optionally render to WAV with FluidSynth.\n",
+        "import mido\n",
+        "from typing import Dict, List, Tuple\n",
+        "from config import PPQ, CHANNELS, PROGRAMS, SOUNDFONT_PATH, STEPS_PER_BAR\n",
+        "from theory import steps_to_ticks\n",
+        "\n",
+        "Event = Tuple[int,int,int,int]  # (start_step, dur_steps, midi_note, velocity)\n",
+        "\n",
+        "def _add_tempo(track, bpm:int):\n",
+        "    mpqn = int(60_000_000 / bpm)  # microseconds per quarter\n",
+        "    track.append(mido.MetaMessage('set_tempo', tempo=mpqn, time=0))\n",
+        "\n",
+        "def _events_to_track(events:List[Event], channel:int) -> mido.MidiTrack:\n",
+        "    # Sort by start then note_off ordering\n",
+        "    # Build delta times from absolute steps\n",
+        "    track = mido.MidiTrack()\n",
+        "    # Convert to a list of (abs_tick, on/off, note, velocity)\n",
+        "    pairs = []\n",
+        "    for (start_s, dur_s, note, vel) in events:\n",
+        "        start_t = steps_to_ticks(start_s)\n",
+        "        end_t   = steps_to_ticks(start_s + max(1, dur_s))\n",
+        "        pairs.append((start_t, True,  note, vel))\n",
+        "        pairs.append((end_t,   False, note, vel))\n",
+        "    pairs.sort(key=lambda x: (x[0], not x[1]))  # note_off before note_on at same time\n",
+        "    # Build delta times\n",
+        "    last = 0\n",
+        "    for t, is_on, note, vel in pairs:\n",
+        "        dt = t - last\n",
+        "        last = t\n",
+        "        if is_on:\n",
+        "            track.append(mido.Message('note_on', note=note, velocity=vel, time=dt, channel=channel))\n",
+        "        else:\n",
+        "            track.append(mido.Message('note_off', note=note, velocity=vel, time=dt, channel=channel))\n",
+        "    return track\n",
+        "\n",
+        "def make_midi(tracks:Dict[str, List[Event]], program_map:Dict[str,str], out_path:str=\"mood.mid\") -> str:\n",
+        "    mid = mido.MidiFile(ticks_per_beat=PPQ)\n",
+        "    # meta\n",
+        "    meta_track = mido.MidiTrack(); mid.tracks.append(meta_track)\n",
+        "    # tempo from _meta\n",
+        "    meta = dict(tracks.get(\"_meta\", []))\n",
+        "    bpm = int(meta.get(\"bpm\", 120))\n",
+        "    _add_tempo(meta_track, bpm)\n",
+        "\n",
+        "    # For each role -> channel -> program\n",
+        "    for role, events in tracks.items():\n",
+        "        if role.startswith(\"_\"):\n",
+        "            continue\n",
+        "        ch = CHANNELS[role]\n",
+        "        t = _events_to_track(events, ch)\n",
+        "        # Set program if not drums\n",
+        "        if role != \"drums\":\n",
+        "            program_name = program_map.get(role)\n",
+        "            if program_name is not None:\n",
+        "                prog_num = PROGRAMS[program_name]\n",
+        "                t.insert(0, mido.Message('program_change', program=prog_num, time=0, channel=ch))\n",
+        "        mid.tracks.append(t)\n",
+        "\n",
+        "    mid.save(out_path)\n",
+        "    return out_path\n",
+        "\n",
+        "def render_wav_from_midi(midi_path:str, wav_path:str=\"mood.wav\", soundfont:str=SOUNDFONT_PATH) -> str:\n",
+        "    # Uses FluidSynth to convert MIDI -> WAV. Requires soundfont file.\n",
+        "    import pyfluidsynth\n",
+        "    fs = pyfluidsynth.Synth()\n",
+        "    sfid = fs.sfload(soundfont)\n",
+        "    fs.start()\n",
+        "    fs.midi_file_to_audio(midi_path, wav_path)\n",
+        "    fs.delete()\n",
+        "    return wav_path\n"
+      ],
+      "metadata": {
+        "colab": {
+          "base_uri": "https://localhost:8080/"
+        },
+        "id": "j-IVK_T8Sj1K",
+        "outputId": "b45f998c-6efc-4f39-cfd4-99a3a933d92f"
+      },
+      "execution_count": null,
+      "outputs": [
+        {
+          "output_type": "stream",
+          "name": "stdout",
+          "text": [
+            "Writing render.py\n"
+          ]
+        }
+      ]
+    },
+    {
+      "cell_type": "markdown",
+      "source": [],
+      "metadata": {
+        "id": "mpgIPHWcPh2W"
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "import importlib, sys\n",
+        "if \"config\" in sys.modules:\n",
+        "    del sys.modules[\"config\"]   # remove old cached version\n",
+        "import config\n",
+        "importlib.reload(config)\n",
+        "\n",
+        "print(\"Loaded moods:\", list(config.__dict__.get(\"MOODS\", {}).keys()))\n"
+      ],
+      "metadata": {
+        "colab": {
+          "base_uri": "https://localhost:8080/"
+        },
+        "id": "UlyUgCk4TBOt",
+        "outputId": "41ddb209-9d5f-4931-f9a5-53d04acd47b9"
+      },
+      "execution_count": null,
+      "outputs": [
+        {
+          "output_type": "stream",
+          "name": "stdout",
+          "text": [
+            "Loaded moods: ['Happy', 'Chill', 'Focus', 'Sad', 'Energetic']\n"
+          ]
+        }
+      ]
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "import importlib, composer\n",
+        "importlib.reload(composer)\n",
+        "print(\"composer reloaded ✔️\")\n"
+      ],
+      "metadata": {
+        "colab": {
+          "base_uri": "https://localhost:8080/"
+        },
+        "id": "asuUldOaTN3j",
+        "outputId": "adfe8aa6-7c6d-46e6-aa49-69df197fc12a"
+      },
+      "execution_count": null,
+      "outputs": [
+        {
+          "output_type": "stream",
+          "name": "stdout",
+          "text": [
+            "composer reloaded ✔️\n"
+          ]
+        }
+      ]
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "from composer import compose\n",
+        "from render import make_midi, render_wav_from_midi\n",
+        "from config import MOODS\n",
+        "\n",
+        "mood_name = \"Focus\"\n",
+        "bars = 16\n",
+        "seed = 42\n",
+        "\n",
+        "tracks = compose(mood_name=mood_name, bars=bars, seed=seed)\n",
+        "\n",
+        "program_map = {}\n",
+        "for role in [\"chords\",\"pad\",\"melody\",\"bass\"]:\n",
+        "    inst = MOODS[mood_name][\"instruments\"].get(role)\n",
+        "    if inst:\n",
+        "        program_map[role] = inst\n",
+        "\n",
+        "midi_path = make_midi(tracks, program_map, out_path=f\"{mood_name.lower()}_{bars}bars.mid\")\n",
+        "print(\"✅ MIDI saved to:\", midi_path)\n"
+      ],
+      "metadata": {
+        "colab": {
+          "base_uri": "https://localhost:8080/"
+        },
+        "id": "MfR8ECj9TVO9",
+        "outputId": "b8fda7f5-c48d-4795-d857-746061d31073"
+      },
+      "execution_count": null,
+      "outputs": [
+        {
+          "output_type": "stream",
+          "name": "stdout",
+          "text": [
+            "✅ MIDI saved to: focus_16bars.mid\n"
+          ]
+        }
+      ]
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "# Listen (if WAV was rendered)\n",
+        "from IPython.display import Audio, display\n",
+        "import os\n",
+        "\n",
+        "wav_guess = f\"{mood_name.lower()}_{bars}bars.wav\"\n",
+        "mid_guess = f\"{mood_name.lower()}_{bars}bars.mid\"\n",
+        "\n",
+        "if os.path.exists(wav_guess):\n",
+        "    display(Audio(wav_guess))\n",
+        "else:\n",
+        "    print(\"No WAV available. You can download the MIDI below and play it in a DAW.\")\n",
+        "\n",
+        "# Download files to your computer\n",
+        "from google.colab import files\n",
+        "if os.path.exists(mid_guess):\n",
+        "    files.download(mid_guess)\n",
+        "if os.path.exists(wav_guess):\n",
+        "    files.download(wav_guess)\n"
+      ],
+      "metadata": {
+        "colab": {
+          "base_uri": "https://localhost:8080/",
+          "height": 34
+        },
+        "id": "fxQlYI36TcVG",
+        "outputId": "b3f39486-e352-4e02-955b-86dc2924c530"
+      },
+      "execution_count": null,
+      "outputs": [
+        {
+          "output_type": "stream",
+          "name": "stdout",
+          "text": [
+            "No WAV available. You can download the MIDI below and play it in a DAW.\n"
+          ]
+        },
+        {
+          "output_type": "display_data",
+          "data": {
+            "text/plain": [
+              "<IPython.core.display.Javascript object>"
+            ],
+            "application/javascript": [
+              "\n",
+              "    async function download(id, filename, size) {\n",
+              "      if (!google.colab.kernel.accessAllowed) {\n",
+              "        return;\n",
+              "      }\n",
+              "      const div = document.createElement('div');\n",
+              "      const label = document.createElement('label');\n",
+              "      label.textContent = `Downloading \"${filename}\": `;\n",
+              "      div.appendChild(label);\n",
+              "      const progress = document.createElement('progress');\n",
+              "      progress.max = size;\n",
+              "      div.appendChild(progress);\n",
+              "      document.body.appendChild(div);\n",
+              "\n",
+              "      const buffers = [];\n",
+              "      let downloaded = 0;\n",
+              "\n",
+              "      const channel = await google.colab.kernel.comms.open(id);\n",
+              "      // Send a message to notify the kernel that we're ready.\n",
+              "      channel.send({})\n",
+              "\n",
+              "      for await (const message of channel.messages) {\n",
+              "        // Send a message to notify the kernel that we're ready.\n",
+              "        channel.send({})\n",
+              "        if (message.buffers) {\n",
+              "          for (const buffer of message.buffers) {\n",
+              "            buffers.push(buffer);\n",
+              "            downloaded += buffer.byteLength;\n",
+              "            progress.value = downloaded;\n",
+              "          }\n",
+              "        }\n",
+              "      }\n",
+              "      const blob = new Blob(buffers, {type: 'application/binary'});\n",
+              "      const a = document.createElement('a');\n",
+              "      a.href = window.URL.createObjectURL(blob);\n",
+              "      a.download = filename;\n",
+              "      div.appendChild(a);\n",
+              "      a.click();\n",
+              "      div.remove();\n",
+              "    }\n",
+              "  "
+            ]
+          },
+          "metadata": {}
+        },
+        {
+          "output_type": "display_data",
+          "data": {
+            "text/plain": [
+              "<IPython.core.display.Javascript object>"
+            ],
+            "application/javascript": [
+              "download(\"download_492464f9-87c8-4ec5-938b-50d4b31c637a\", \"focus_16bars.mid\", 3864)"
+            ]
+          },
+          "metadata": {}
+        }
+      ]
+    }
+  ]
+}
